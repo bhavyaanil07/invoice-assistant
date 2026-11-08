@@ -1,4 +1,5 @@
 import os
+import time
 import uuid
 from datetime import date
 
@@ -97,13 +98,17 @@ def new_session():
 
     def list_invoices() -> dict:
         """Get all recent invoices with client, amount, status, due date and whether they are overdue."""
-        return pp.list_invoices()
+        start = time.time()
+        result = pp.list_invoices()
+        print(f"   [timing] PayPal list_invoices took {time.time() - start:.1f} seconds")
+        return result
 
     state["chat"] = client.chats.create(
         model=MODEL,
         config=types.GenerateContentConfig(
             system_instruction=system_prompt(),
             tools=[propose_invoice, propose_reminder, list_invoices],
+            thinking_config=types.ThinkingConfig(thinking_level="low"),
         ),
     )
     return state
@@ -117,11 +122,13 @@ def get_session(session_id):
 
 def ask_agent(state, text):
     state["new_actions"] = []
+    start = time.time()
     try:
         response = state["chat"].send_message(text)
         reply = response.text or ""
     except Exception as e:
         reply = f"Sorry, something went wrong: {e}"
+    print(f"   [timing] Full AI reply took {time.time() - start:.1f} seconds")
     return {"reply": reply, "actions": state["new_actions"]}
 
 
