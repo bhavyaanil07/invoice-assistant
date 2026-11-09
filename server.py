@@ -1,30 +1,43 @@
 import os
 import re
+import threading
 import time
 import uuid
 from datetime import date, timedelta
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 from google import genai
 from google.genai import types
 
 import paypal_client as pp
 import risk
+import webhooks
 
 load_dotenv()
 os.environ.pop("GOOGLE_API_KEY", None)
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "")
+WEBHOOK_ID = os.getenv("PAYPAL_WEBHOOK_ID", "")
 
 MAX_INVOICE_AMOUNT = 10000
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 app = FastAPI()
-sessions = {}  # one chat per browser tab
+sessions = {}        # one chat per browser tab
+payment_events = []  # payments reported by PayPal webhooks, shared by everyone viewing
+events_lock = threading.Lock()
+last_known_risk = {}  # client name -> latest risk result, used for before/after comparison
+
+
+def remember_risk(result):
+    if isinstance(result, dict) and "clients" in result:
+        for c in result["clients"]:
+            last_known_risk[c["client"]] = c
 
 
 def system_prompt():
@@ -49,7 +62,8 @@ How you work:
   explain using its reason and expected_payment_date.
 - If a tool returns an error, explain the problem to the user in simple words and ask for the correct
   details. Never retry with made-up values.
-- Messages in [square brackets] come from the app, not the user typing.
+- Messages in [square brackets] come from the app, not the user typing. An [App notice] tells you
+  about payments PayPal reported since the last message; take them into account.
 - Never say an invoice or reminder was sent unless the app tells you PayPal confirmed it.
 - Never make up invoice IDs, statuses or scores; always use the tools.
 - Keep replies short and friendly. Write plain text only, no markdown, no asterisks.
@@ -127,7 +141,9 @@ def make_chat(model, tools, history=None):
 
 
 def new_session():
-    state = {"pending": {}, "new_actions": [], "activity": [], "model": MODEL}
+    with events_lock:
+        latest_event = payment_events[-1]["id"] if payment_events else 0
+    state = {"pending": {}, "new_actions": [], "activity": [], "model": MODEL, "seen_event_id": latest_event}
 
     def propose_invoice(client_name: str, client_email: str, item: str,
                         amount: float, due_date: str) -> dict:
@@ -207,6 +223,7 @@ def new_session():
         if "error" in result:
             log(state, "error", "Risk engine: could not score clients")
         else:
+            remember_risk(result)
             summary = ", ".join(
                 f"{c['client']} {c['risk_level']}" + (f" ({c['risk_score']})" if c["risk_score"] is not None else "")
                 for c in result["clients"]
@@ -272,6 +289,105 @@ def ask_agent(state, text, pre_activity=None):
     return {"reply": reply, "actions": state["new_actions"], "activity": state["activity"]}
 
 
+def pending_notices(state):
+    """Payments reported since this chat last heard about them, as text for the agent."""
+    with events_lock:
+        new_events = [e for e in payment_events if e["id"] > state["seen_event_id"]]
+    if not new_events:
+        return ""
+    state["seen_event_id"] = new_events[-1]["id"]
+    return "[App notice: " + " ".join(e["message"] for e in new_events) + "]\n"
+
+
+# ---------- PayPal webhook: payment detected ----------
+
+def describe_timing(paid_on, due_date):
+    try:
+        days = (date.fromisoformat(paid_on[:10]) - date.fromisoformat(due_date[:10])).days
+    except (TypeError, ValueError):
+        return ""
+    if days > 0:
+        return f"{days} day{'s' if days != 1 else ''} late"
+    if days < 0:
+        return f"{-days} day{'s' if days != -1 else ''} early"
+    return "on the due date"
+
+
+def risk_text(c):
+    if c is None:
+        return "unknown"
+    if c["risk_score"] is None:
+        return "New"
+    return f"{c['risk_level']} ({c['risk_score']})"
+
+
+def handle_webhook(event, headers):
+    if not webhooks.verify(headers, event, WEBHOOK_ID):
+        return 400, {"status": "rejected"}
+
+    event_type = event.get("event_type", "")
+    resource = event.get("resource", {}) or {}
+    invoice = resource.get("invoice", resource)
+    invoice_id = invoice.get("id")
+    print(f"   [webhook] verified {event_type} for {invoice_id}")
+
+    if event_type != "INVOICING.INVOICE.PAID" or not invoice_id:
+        return 200, {"status": "ignored"}
+    with events_lock:
+        if any(e["invoice_id"] == invoice_id for e in payment_events):
+            return 200, {"status": "duplicate"}
+
+    details = webhooks.get_invoice(invoice_id) or invoice
+    recipient = (details.get("primary_recipients") or [{}])[0].get("billing_info", {})
+    client_name = recipient.get("name", {}).get("given_name") or recipient.get("name", {}).get("full_name") or "A client"
+    amount = details.get("amount", {})
+    amount_text = f"${float(amount.get('value', 0)):.2f}"
+    due_date = details.get("detail", {}).get("payment_term", {}).get("due_date", "")
+    transactions = details.get("payments", {}).get("transactions", [])
+    paid_on = (transactions[-1].get("payment_date") if transactions else None) or date.today().isoformat()
+
+    before = last_known_risk.get(client_name)
+    after_all = risk.client_risk()
+    remember_risk(after_all)
+    after = next((c for c in after_all.get("clients", []) if c["client"] == client_name), None)
+
+    timing = describe_timing(paid_on, due_date)
+    message = f"Payment detected: {client_name} paid {amount_text} for invoice {invoice_id}"
+    message += f", {timing}." if timing else "."
+    if after is not None:
+        if before is not None and before.get("avg_days_late") is not None:
+            message += (f" Risk {risk_text(before)} \u2192 {risk_text(after)}; average lateness "
+                        f"{before['avg_days_late']} \u2192 {after['avg_days_late']} days.")
+        else:
+            message += f" Risk is now {risk_text(after)}."
+
+    with events_lock:
+        payment_events.append({
+            "id": (payment_events[-1]["id"] + 1) if payment_events else 1,
+            "event_type": event_type,
+            "invoice_id": invoice_id,
+            "client": client_name,
+            "message": message,
+        })
+    print(f"   [webhook] {message}")
+    return 200, {"status": "ok"}
+
+
+# ---------- start-up warm-up so the first visitor doesn't wait ----------
+
+@app.on_event("startup")
+def warm_up():
+    def run():
+        try:
+            remember_risk(risk.client_risk())
+            print("   [info] Risk cache warmed up")
+        except Exception as e:
+            print(f"   [info] Warm-up failed: {e}")
+    threading.Thread(target=run, daemon=True).start()
+
+
+# ---------- web endpoints ----------
+
 class ChatIn(BaseModel):
     session_id: str
     message: str
@@ -294,7 +410,8 @@ def home():
 
 @app.post("/api/chat")
 def chat(body: ChatIn):
-    return ask_agent(get_session(body.session_id), body.message)
+    state = get_session(body.session_id)
+    return ask_agent(state, pending_notices(state) + body.message)
 
 
 @app.post("/api/nudge")
@@ -344,6 +461,23 @@ def confirm(body: ConfirmIn):
     return out
 
 
+@app.post("/api/paypal/webhook")
+async def paypal_webhook(request: Request):
+    try:
+        event = await request.json()
+    except Exception:
+        return JSONResponse({"status": "bad request"}, status_code=400)
+    headers = {k.lower(): v for k, v in request.headers.items()}
+    status_code, body = await run_in_threadpool(handle_webhook, event, headers)
+    return JSONResponse(body, status_code=status_code)
+
+
+@app.get("/api/events")
+def events(after: int = 0):
+    with events_lock:
+        return {"events": [e for e in payment_events if e["id"] > after]}
+
+
 @app.get("/api/invoices")
 def invoices():
     return pp.list_invoices()
@@ -351,4 +485,6 @@ def invoices():
 
 @app.get("/api/risk")
 def client_risk():
-    return risk.client_risk()
+    result = risk.client_risk()
+    remember_risk(result)
+    return result

@@ -19,6 +19,7 @@ main{display:grid;grid-template-columns:minmax(360px,5fr) minmax(0,6fr);gap:16px
 .user{align-self:flex-end;background:var(--blue);color:#fff}
 .assistant{align-self:flex-start;background:#eef2f7}
 .assistant a{color:var(--blue);word-break:break-all}
+.event{align-self:flex-start;background:#dcfce7;border:1px solid #86efac;color:#14532d;font-weight:500}
 .thinking{align-self:flex-start;color:var(--muted);font-style:italic}
 .trace{align-self:flex-start;width:min(560px,95%);border:1px dashed #cbd5e1;border-radius:10px;padding:8px 12px;background:#fbfcfd;font-family:Consolas,ui-monospace,monospace;font-size:12.5px;color:#475569}
 .trace-title{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:4px}
@@ -275,6 +276,27 @@ form.addEventListener("submit", e => {
 });
 document.querySelectorAll(".suggestions button").forEach(b => b.onclick = () => sendMessage(b.dataset.text));
 
+/* ---------- live payment events from PayPal webhooks ---------- */
+let lastEventId = 0;
+
+async function pollEvents(firstCheck) {
+  try {
+    const r = await fetch("/api/events?after=" + lastEventId);
+    const data = await r.json();
+    const newEvents = data.events || [];
+    newEvents.forEach(ev => {
+      lastEventId = Math.max(lastEventId, ev.id);
+      if (!firstCheck) {
+        addActivity([{kind: "paypal", text: "PayPal webhook: " + ev.event_type + " verified for " + ev.invoice_id}]);
+        addMessage("event", "\u2713 " + ev.message);
+      }
+    });
+    if (!firstCheck && newEvents.length) refreshSide();
+  } catch (e) {
+    /* server asleep or offline: try again on the next check */
+  }
+}
+
 /* ---------- AG Grid: client risk ---------- */
 let riskGrid = null;
 let invoiceGrid = null;
@@ -420,6 +442,8 @@ async function startup() {
   riskGrid = makeGrid("risk-grid", riskColumns);
   invoiceGrid = makeGrid("invoice-grid", invoiceColumns);
   refreshSide();
+  await pollEvents(true);
+  setInterval(() => pollEvents(false), 5000);
   const t = showThinking();
   try {
     const data = await post("/api/nudge", {session_id: sessionId});
