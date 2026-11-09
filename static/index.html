@@ -20,6 +20,14 @@ main{display:grid;grid-template-columns:minmax(360px,5fr) minmax(0,6fr);gap:16px
 .assistant{align-self:flex-start;background:#eef2f7}
 .assistant a{color:var(--blue);word-break:break-all}
 .thinking{align-self:flex-start;color:var(--muted);font-style:italic}
+.trace{align-self:flex-start;width:min(560px,95%);border:1px dashed #cbd5e1;border-radius:10px;padding:8px 12px;background:#fbfcfd;font-family:Consolas,ui-monospace,monospace;font-size:12.5px;color:#475569}
+.trace-title{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:4px}
+.trace-line{padding:2px 0;line-height:1.4}
+.trace-line.paypal{color:var(--green)}
+.trace-line.error{color:var(--red)}
+.trace-line.wait{color:var(--amber)}
+.trace-line.ai{color:#6d28d9}
+.trace-line.user{color:var(--blue)}
 .card{align-self:flex-start;border:1px solid var(--border);border-left:4px solid var(--blue);border-radius:10px;padding:12px 14px;width:min(380px,90%);background:#fff}
 .card h3{margin:0 0 8px;font-size:15px}
 .card .row{display:flex;justify-content:space-between;font-size:14px;padding:3px 0;gap:12px}
@@ -103,6 +111,7 @@ const messages = document.getElementById("messages");
 const form = document.getElementById("chat-form");
 const input = document.getElementById("input");
 const OPEN_STATUSES = ["SENT", "UNPAID", "PARTIALLY_PAID", "PAYMENT_PENDING"];
+const STEP_ICONS = {read: "\u2193", ai: "\u2726", wait: "\u23F8", paypal: "\u2713", error: "\u26A0", info: "\u2139", user: "\u261B"};
 
 /* ---------- small helpers ---------- */
 function escapeHtml(t) {
@@ -140,6 +149,24 @@ function showThinking() {
   messages.appendChild(d);
   scrollDown();
   return d;
+}
+
+function addActivity(steps) {
+  if (!steps || !steps.length) return;
+  const box = document.createElement("div");
+  box.className = "trace";
+  const title = document.createElement("div");
+  title.className = "trace-title";
+  title.textContent = "Agent steps";
+  box.appendChild(title);
+  steps.forEach(step => {
+    const line = document.createElement("div");
+    line.className = "trace-line " + step.kind;
+    line.textContent = (STEP_ICONS[step.kind] || "\u2022") + " " + step.text;
+    box.appendChild(line);
+  });
+  messages.appendChild(box);
+  scrollDown();
 }
 
 async function post(url, data) {
@@ -220,6 +247,7 @@ async function decide(action, approved, yes, no, result) {
 }
 
 function handleResponse(data) {
+  addActivity(data.activity);
   if (data.reply) addMessage("assistant", data.reply);
   (data.actions || []).forEach(addActionCard);
 }
