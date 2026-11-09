@@ -11,7 +11,7 @@ body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;backgrou
 header{background:var(--navy);color:#fff;padding:14px 20px;display:flex;align-items:baseline;gap:12px}
 header h1{font-size:20px;margin:0}
 header span{opacity:.8;font-size:14px}
-main{display:grid;grid-template-columns:1fr 360px;gap:16px;padding:16px;height:calc(100vh - 56px)}
+main{display:grid;grid-template-columns:1fr 380px;gap:16px;padding:16px;height:calc(100vh - 56px)}
 .panel{background:var(--card);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;min-height:0}
 #messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
 .msg{max-width:80%;padding:10px 14px;border-radius:12px;line-height:1.45;white-space:pre-wrap;word-wrap:break-word}
@@ -37,15 +37,20 @@ form{display:flex;gap:8px;padding:12px;border-top:1px solid var(--border)}
 #input{flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font:inherit}
 .panel-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border)}
 .panel-head h2{margin:0;font-size:16px}
-#invoices{overflow-y:auto;padding:8px 12px}
-.inv{padding:10px 4px;border-bottom:1px solid var(--border);font-size:14px}
-.inv .top{display:flex;justify-content:space-between;font-weight:600}
-.inv .sub{display:flex;justify-content:space-between;color:var(--muted);margin-top:4px}
-.badge{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px}
-.paid{background:#dcfce7;color:var(--green)}
-.overdue{background:#fee2e2;color:var(--red)}
-.unpaid{background:#fef3c7;color:var(--amber)}
-.other{background:#e5e7eb;color:#374151}
+.side-scroll{overflow-y:auto;padding:4px 12px 12px}
+.section-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:14px 4px 4px}
+.section-note{font-size:12px;color:var(--muted);margin:0 4px 6px}
+.item{padding:10px 4px;border-bottom:1px solid var(--border);font-size:14px}
+.item .top{display:flex;justify-content:space-between;align-items:center;font-weight:600;gap:8px}
+.item .sub{display:flex;justify-content:space-between;color:var(--muted);margin-top:4px;gap:8px}
+.item .reason{color:var(--muted);margin-top:4px;line-height:1.4}
+.item .expect{margin-top:4px;font-size:13px}
+.badge{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.paid,.low{background:#dcfce7;color:var(--green)}
+.overdue,.high{background:#fee2e2;color:var(--red)}
+.unpaid,.medium{background:#fef3c7;color:var(--amber)}
+.other,.new{background:#e5e7eb;color:#374151}
+.muted{color:var(--muted);font-size:14px;margin:8px 4px}
 @media (max-width:800px){main{grid-template-columns:1fr;height:auto}#messages{height:60vh}}
 </style>
 </head>
@@ -57,6 +62,7 @@ form{display:flex;gap:8px;padding:12px;border-top:1px solid var(--border)}
     <div class="suggestions">
       <button type="button" data-text="Who still owes me money?">Who owes me?</button>
       <button type="button" data-text="Draft reminders for everyone who is overdue">Remind overdue clients</button>
+      <button type="button" data-text="Which clients pay late, and when should I expect my money?">Who pays late?</button>
     </div>
     <form id="chat-form">
       <input id="input" autocomplete="off" placeholder='Try: "Bill Rahul at rahul@example.com $150 for website design, due Friday"'>
@@ -64,8 +70,14 @@ form{display:flex;gap:8px;padding:12px;border-top:1px solid var(--border)}
     </form>
   </section>
   <aside class="panel">
-    <div class="panel-head"><h2>Invoices</h2><button class="secondary" id="refresh" type="button">Refresh</button></div>
-    <div id="invoices"><p style="color:var(--muted)">Loading...</p></div>
+    <div class="panel-head"><h2>Overview</h2><button class="secondary" id="refresh" type="button">Refresh</button></div>
+    <div class="side-scroll">
+      <div class="section-title">Client payment risk</div>
+      <p class="section-note">Scored from each client's PayPal payment history</p>
+      <div id="risk"><p class="muted">Loading...</p></div>
+      <div class="section-title">Invoices</div>
+      <div id="invoices"><p class="muted">Loading...</p></div>
+    </div>
   </aside>
 </main>
 <script>
@@ -79,6 +91,9 @@ function escapeHtml(t) {
 }
 function linkify(t) {
   return escapeHtml(t).replace(/(https?:\/\/[^\s)]+[^\s).,])/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+}
+function money(amountText) {
+  return "$" + String(amountText).split(" ")[0];
 }
 function scrollDown() { messages.scrollTop = messages.scrollHeight; }
 
@@ -168,7 +183,7 @@ async function decide(action, approved, yes, no, result) {
       result.textContent = (data.result && !data.result.error) ? "\u2713 Sent through PayPal" : "\u2717 Something went wrong";
     }
     handleResponse(data);
-    loadInvoices();
+    refreshSide();
   } catch (e) {
     t.remove();
     result.textContent = "\u2717 " + e.message;
@@ -203,7 +218,7 @@ form.addEventListener("submit", e => {
 });
 document.querySelectorAll(".suggestions button").forEach(b => b.onclick = () => sendMessage(b.dataset.text));
 
-function badge(inv) {
+function invoiceBadge(inv) {
   if (inv.status === "PAID" || inv.status === "MARKED_AS_PAID") return ["paid", "Paid"];
   if (inv.overdue) return ["overdue", "Overdue"];
   if (["SENT", "UNPAID", "PARTIALLY_PAID", "PAYMENT_PENDING"].includes(inv.status)) return ["unpaid", "Unpaid"];
@@ -215,26 +230,59 @@ async function loadInvoices() {
   try {
     const r = await fetch("/api/invoices");
     const data = await r.json();
-    if (data.error) { box.innerHTML = "<p>Could not load invoices.</p>"; return; }
-    if (!data.invoices.length) { box.innerHTML = '<p style="color:var(--muted)">No invoices yet.</p>'; return; }
+    if (data.error) { box.innerHTML = '<p class="muted">Could not load invoices.</p>'; return; }
+    if (!data.invoices.length) { box.innerHTML = '<p class="muted">No invoices yet.</p>'; return; }
     box.innerHTML = "";
     data.invoices.forEach(inv => {
-      const [cls, label] = badge(inv);
+      const [cls, label] = invoiceBadge(inv);
       const d = document.createElement("div");
-      d.className = "inv";
+      d.className = "item";
       d.innerHTML =
-        '<div class="top"><span>' + escapeHtml(inv.client) + '</span><span>$' + escapeHtml(String(inv.amount).split(" ")[0]) + '</span></div>' +
+        '<div class="top"><span>' + escapeHtml(inv.client) + '</span><span>' + escapeHtml(money(inv.amount)) + '</span></div>' +
         '<div class="sub"><span>Due ' + escapeHtml(inv.due_date || "-") + '</span><span class="badge ' + cls + '">' + escapeHtml(label) + '</span></div>';
       box.appendChild(d);
     });
   } catch (e) {
-    box.innerHTML = "<p>Could not load invoices.</p>";
+    box.innerHTML = '<p class="muted">Could not load invoices.</p>';
   }
 }
-document.getElementById("refresh").onclick = loadInvoices;
+
+async function loadRisk() {
+  const box = document.getElementById("risk");
+  try {
+    const r = await fetch("/api/risk");
+    const data = await r.json();
+    if (data.error) { box.innerHTML = '<p class="muted">Could not load risk scores.</p>'; return; }
+    if (!data.clients.length) { box.innerHTML = '<p class="muted">No clients yet.</p>'; return; }
+    box.innerHTML = "";
+    data.clients.forEach(c => {
+      const level = c.risk_level;
+      const label = level === "New" ? "New client" : level + " risk (" + c.risk_score + ")";
+      let html =
+        '<div class="top"><span>' + escapeHtml(c.client) + '</span><span class="badge ' + level.toLowerCase() + '">' + escapeHtml(label) + '</span></div>' +
+        '<div class="reason">' + escapeHtml(c.reason) + '</div>';
+      (c.open_invoices || []).forEach(o => {
+        html += '<div class="expect">Expected: ' + escapeHtml(money(o.amount)) + ' around ' + escapeHtml(o.expected_payment_date) +
+                ' <span style="color:var(--muted)">(due ' + escapeHtml(o.due_date) + ')</span></div>';
+      });
+      const d = document.createElement("div");
+      d.className = "item";
+      d.innerHTML = html;
+      box.appendChild(d);
+    });
+  } catch (e) {
+    box.innerHTML = '<p class="muted">Could not load risk scores.</p>';
+  }
+}
+
+function refreshSide() {
+  loadInvoices();
+  loadRisk();
+}
+document.getElementById("refresh").onclick = refreshSide;
 
 async function startup() {
-  loadInvoices();
+  refreshSide();
   const t = showThinking();
   try {
     const data = await post("/api/nudge", {session_id: sessionId});
