@@ -3,81 +3,174 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PayNudge</title>
+<title>Paidwise</title>
+<script>
+  /* set the theme before the page draws, so there is no flash */
+  (function () {
+    var theme = "light";
+    try {
+      var saved = localStorage.getItem("paidwise-theme");
+      if (saved === "dark" || saved === "light") theme = saved;
+      else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) theme = "dark";
+    } catch (e) {
+      if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) theme = "dark";
+    }
+    document.documentElement.setAttribute("data-theme", theme);
+  })();
+</script>
 <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
 <style>
-:root{--blue:#0070e0;--navy:#003087;--bg:#f5f7fa;--card:#fff;--text:#1a1a1a;--muted:#6b7280;--border:#e5e7eb;--green:#15803d;--red:#b91c1c;--amber:#b45309}
+:root{
+  --navy:#001c64;--navy-text:#0b1f45;--blue:#0070e0;--blue-hover:#005ea6;--blue-soft:#e8f1fc;
+  --bg:#f5f7fa;--card:#ffffff;--surface-2:#f5f7fa;--header-bg:#ffffff;--logo-bg:#001c64;
+  --muted:#5f6b80;--border:#e3e8ef;--border-soft:#f0f3f7;--border-strong:#cfd6e0;
+  --green:#127a3d;--red:#c0182e;--amber:#a15c00;--violet:#5b3fb8;
+  --paid-bg:#e3f5ea;--high-bg:#fde8eb;--medium-bg:#fff1d6;--new-bg:#edf0f5;--new-text:#3b4a63;
+  --protect-bg:#fff8eb;--protect-border:#f3d9a4;
+  --event-bg:#e9f7ef;--event-border:#9bd9b5;--event-text:#0d5c2e;
+  --trace-bg:#fafbfd;--trace-text:#475569;
+  --input-bg:#ffffff;
+  --shadow:0 1px 2px rgba(11,31,69,.06),0 2px 8px rgba(11,31,69,.04);
+  --shadow-hover:0 4px 14px rgba(11,31,69,.10);
+  color-scheme:light;
+}
+:root[data-theme="dark"]{
+  --navy:#e8eefb;--navy-text:#d3dcec;--blue:#3d9bff;--blue-hover:#65b1ff;--blue-soft:#132a4d;
+  --bg:#0a1120;--card:#101a2d;--surface-2:#16223a;--header-bg:#0d1628;--logo-bg:#3d9bff;
+  --muted:#93a1b8;--border:#1f2b42;--border-soft:#1a2538;--border-strong:#2d3b57;
+  --green:#4ade80;--red:#fb7185;--amber:#fbbf24;--violet:#a78bfa;
+  --paid-bg:#0f3824;--high-bg:#3f1420;--medium-bg:#3a2b0b;--new-bg:#1e293b;--new-text:#cbd5e1;
+  --protect-bg:#2a210a;--protect-border:#5a4512;
+  --event-bg:#0c2e1b;--event-border:#1f6b40;--event-text:#86efac;
+  --trace-bg:#0d1627;--trace-text:#a3b1c7;
+  --input-bg:#0d1628;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 2px 10px rgba(0,0,0,.25);
+  --shadow-hover:0 6px 18px rgba(0,0,0,.45);
+  color-scheme:dark;
+}
 *{box-sizing:border-box}
-body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text)}
-header{background:var(--navy);color:#fff;padding:14px 20px;display:flex;align-items:baseline;gap:12px}
-header h1{font-size:20px;margin:0}
-header span{opacity:.8;font-size:14px}
-main{display:grid;grid-template-columns:minmax(360px,5fr) minmax(0,6fr);gap:16px;padding:16px;height:calc(100vh - 56px)}
-.panel{background:var(--card);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;min-height:0;min-width:0}
-#messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
-.msg{max-width:85%;padding:10px 14px;border-radius:12px;line-height:1.45;white-space:pre-wrap;word-wrap:break-word}
-.user{align-self:flex-end;background:var(--blue);color:#fff}
-.assistant{align-self:flex-start;background:#eef2f7}
-.assistant a{color:var(--blue);word-break:break-all}
-.event{align-self:flex-start;background:#dcfce7;border:1px solid #86efac;color:#14532d;font-weight:500}
-.thinking{align-self:flex-start;color:var(--muted);font-style:italic}
-.trace{align-self:flex-start;width:min(560px,95%);border:1px dashed #cbd5e1;border-radius:10px;padding:8px 12px;background:#fbfcfd;font-family:Consolas,ui-monospace,monospace;font-size:12.5px;color:#475569}
-.trace-title{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:4px}
-.trace-line{padding:2px 0;line-height:1.4}
+html,body{height:100%}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--bg);color:var(--navy-text);-webkit-font-smoothing:antialiased;transition:background .25s,color .25s}
+
+/* header */
+header{height:64px;background:var(--header-bg);border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;gap:12px}
+.logo{width:34px;height:34px;border-radius:50%;background:var(--logo-bg);color:#fff;display:grid;place-items:center;font-weight:800;font-size:13px;letter-spacing:-.3px}
+header h1{font-size:20px;margin:0;color:var(--navy);font-weight:800;letter-spacing:-.4px}
+header .tagline{color:var(--muted);font-size:14px;padding-left:12px;border-left:1px solid var(--border)}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.live{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--navy);background:var(--surface-2);border:1px solid var(--border);padding:6px 12px;border-radius:999px}
+.live-dot{width:8px;height:8px;border-radius:50%;background:#1aa260;animation:pulse 2s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(26,162,96,.55)}70%{box-shadow:0 0 0 7px rgba(26,162,96,0)}100%{box-shadow:0 0 0 0 rgba(26,162,96,0)}}
+.theme-toggle{width:36px;height:36px;padding:0;border-radius:50%;display:grid;place-items:center;font-size:17px;background:var(--surface-2);color:var(--navy);box-shadow:inset 0 0 0 1px var(--border)}
+.theme-toggle:hover{box-shadow:inset 0 0 0 1px var(--blue)}
+
+/* layout */
+main{display:grid;grid-template-columns:minmax(360px,5fr) minmax(0,6fr);gap:20px;padding:20px 24px;height:calc(100vh - 64px)}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:0;min-width:0;transition:background .25s,border-color .25s}
+
+/* chat */
+#messages{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:85%;padding:11px 16px;border-radius:18px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;animation:rise .3s ease-out both}
+.user{align-self:flex-end;background:var(--blue);color:#fff;border-bottom-right-radius:6px}
+.assistant{align-self:flex-start;background:var(--surface-2);color:var(--navy-text);border-bottom-left-radius:6px}
+.assistant a{color:var(--blue);font-weight:600;word-break:break-all}
+.event{align-self:flex-start;background:var(--event-bg);border:1px solid var(--event-border);color:var(--event-text);font-weight:600;animation:rise .3s ease-out both,glow 1.4s ease-out 2}
+@keyframes glow{0%{box-shadow:0 0 0 0 rgba(18,122,61,.35)}100%{box-shadow:0 0 0 12px rgba(18,122,61,0)}}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.thinking{align-self:flex-start;color:var(--muted);font-size:14px;display:flex;align-items:center;gap:8px;padding:6px 4px}
+.dots{display:inline-flex;gap:4px}
+.dots i{width:6px;height:6px;border-radius:50%;background:var(--blue);opacity:.35;animation:bounce 1.1s infinite ease-in-out}
+.dots i:nth-child(2){animation-delay:.15s}
+.dots i:nth-child(3){animation-delay:.3s}
+@keyframes bounce{0%,80%,100%{transform:translateY(0);opacity:.35}40%{transform:translateY(-5px);opacity:1}}
+
+.trace{align-self:flex-start;width:min(560px,95%);border:1px solid var(--border);border-radius:12px;padding:10px 14px;background:var(--trace-bg);font-family:Consolas,ui-monospace,monospace;font-size:12.5px;color:var(--trace-text);animation:rise .3s ease-out both}
+.trace-title{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:4px}
+.trace-line{padding:2px 0;line-height:1.45}
 .trace-line.paypal{color:var(--green)}
 .trace-line.error{color:var(--red)}
 .trace-line.wait{color:var(--amber)}
-.trace-line.ai{color:#6d28d9}
+.trace-line.ai{color:var(--violet)}
 .trace-line.user{color:var(--blue)}
-.card{align-self:flex-start;border:1px solid var(--border);border-left:4px solid var(--blue);border-radius:10px;padding:12px 14px;width:min(420px,92%);background:#fff}
-.card h3{margin:0 0 8px;font-size:15px}
-.card .row{display:flex;justify-content:space-between;font-size:14px;padding:3px 0;gap:12px}
+
+.card{align-self:flex-start;border:1px solid var(--border);border-radius:16px;padding:16px 18px;width:min(420px,92%);background:var(--card);box-shadow:var(--shadow);animation:rise .3s ease-out both;transition:box-shadow .2s}
+.card:hover{box-shadow:var(--shadow-hover)}
+.card h3{margin:0 0 10px;font-size:16px;color:var(--navy);font-weight:700}
+.card .row{display:flex;justify-content:space-between;font-size:14px;padding:4px 0;gap:12px;border-bottom:1px solid var(--border-soft)}
+.card .row:last-of-type{border-bottom:none}
 .card .row span:first-child{color:var(--muted)}
-.card .row span:last-child{text-align:right;word-break:break-all}
-.card .note{font-size:14px;background:#f9fafb;padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap}
-.card .buttons{display:flex;gap:8px;margin-top:10px}
-.card .result{margin-top:8px;font-size:14px;font-weight:600}
-.protect{margin-top:10px;border:1px solid #fde68a;background:#fffbeb;border-radius:8px;padding:8px 10px}
+.card .row span:last-child{text-align:right;word-break:break-all;font-weight:600}
+.card .note{font-size:14px;background:var(--surface-2);padding:10px 12px;border-radius:10px;margin-top:8px;white-space:pre-wrap;line-height:1.5}
+.card .buttons{display:flex;gap:10px;margin-top:14px}
+.card .result{margin-top:10px;font-size:14px;font-weight:700}
+.protect{margin-top:12px;border:1px solid var(--protect-border);background:var(--protect-bg);border-radius:12px;padding:10px 12px}
 .protect-title{font-size:13px;font-weight:700;color:var(--amber);margin-bottom:6px}
-.option{display:flex;gap:8px;align-items:flex-start;font-size:13px;padding:5px 0;cursor:pointer;line-height:1.35}
-.option input{margin-top:3px}
+.option{display:flex;gap:10px;align-items:flex-start;font-size:13px;padding:7px 8px;cursor:pointer;line-height:1.4;border-radius:10px;transition:background .15s}
+.option:hover{background:var(--card)}
+.option input{margin-top:3px;accent-color:var(--blue)}
+.option b{color:var(--navy)}
 .option .hint{color:var(--muted)}
-button{font:inherit;border:none;border-radius:8px;padding:8px 14px;cursor:pointer}
+
+/* buttons: pill style */
+button{font:inherit;font-weight:700;border:none;border-radius:999px;padding:9px 20px;cursor:pointer;transition:background .15s,box-shadow .15s,transform .1s}
+button:active:not(:disabled){transform:scale(.98)}
 .primary{background:var(--blue);color:#fff}
-.secondary{background:#e5e7eb}
-button:disabled{opacity:.5;cursor:default}
-.suggestions{display:flex;gap:6px;flex-wrap:wrap;padding:0 12px 4px}
-.suggestions button{background:#eef2f7;font-size:13px;padding:6px 10px}
-form{display:flex;gap:8px;padding:12px;border-top:1px solid var(--border)}
-#input{flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font:inherit;min-width:0}
-.panel-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border)}
-.panel-head h2{margin:0;font-size:16px}
-.side-scroll{overflow-y:auto;padding:12px 16px 16px}
-.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
-.tile{border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:#fafbfc}
-.tile .label{font-size:12px;color:var(--muted)}
-.tile .value{font-size:20px;font-weight:700;margin-top:4px}
-.tile .hint{font-size:11px;color:var(--muted);margin-top:2px}
+.primary:hover:not(:disabled){background:var(--blue-hover)}
+.secondary{background:var(--card);color:var(--navy);box-shadow:inset 0 0 0 2px var(--navy)}
+.secondary:hover:not(:disabled){background:var(--surface-2)}
+button:disabled{opacity:.45;cursor:default}
+.suggestions{display:flex;gap:8px;flex-wrap:wrap;padding:0 16px 8px}
+.suggestions button{background:var(--card);color:var(--blue);font-size:13px;font-weight:600;padding:6px 14px;box-shadow:inset 0 0 0 1px var(--border-strong)}
+.suggestions button:hover{background:var(--blue-soft);box-shadow:inset 0 0 0 1px var(--blue)}
+form{display:flex;gap:10px;padding:14px 16px 16px;border-top:1px solid var(--border)}
+#input{flex:1;padding:12px 18px;border:1px solid var(--border-strong);border-radius:999px;font:inherit;min-width:0;color:var(--navy-text);background:var(--input-bg);transition:border-color .15s,box-shadow .15s}
+#input::placeholder{color:var(--muted)}
+#input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(0,112,224,.18)}
+
+/* overview side */
+.panel-head{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border)}
+.panel-head h2{margin:0;font-size:18px;color:var(--navy);font-weight:800;letter-spacing:-.3px}
+.panel-head button{padding:7px 16px;font-size:13px}
+.side-scroll{overflow-y:auto;padding:18px 20px 20px}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;perspective:900px}
+.tile{border:1px solid var(--border);border-radius:14px;padding:14px 16px;background:var(--card);box-shadow:var(--shadow);transition:transform .15s ease-out,box-shadow .2s,background .25s;will-change:transform}
+.tile:hover{box-shadow:var(--shadow-hover)}
+.tile .label{font-size:13px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:6px}
+.tile .label::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--blue)}
+.tile.warn .label::before{background:var(--red)}
+.tile.good .label::before{background:var(--green)}
+.tile .value{font-size:24px;font-weight:800;margin-top:6px;color:var(--navy);letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.tile .hint{font-size:12px;color:var(--muted);margin-top:2px}
 .tile.warn .value{color:var(--red)}
 .tile.good .value{color:var(--green)}
-.section-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:18px 0 2px}
-.section-note{font-size:12px;color:var(--muted);margin:0 0 8px}
+.section-title{font-size:16px;font-weight:800;color:var(--navy);margin:26px 0 2px;letter-spacing:-.2px}
+.section-note{font-size:13px;color:var(--muted);margin:0 0 10px}
 .grid-box{width:100%}
-.badge{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
-.paid,.low{background:#dcfce7;color:var(--green)}
-.overdue,.high{background:#fee2e2;color:var(--red)}
-.unpaid,.medium{background:#fef3c7;color:var(--amber)}
-.other,.new{background:#e5e7eb;color:#374151}
-.grid-btn{background:#eef2f7;color:var(--blue);font-size:12px;padding:4px 10px;border-radius:6px;font-weight:600}
-.grid-btn:hover{background:#dbe7f5}
+.badge{font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.paid,.low{background:var(--paid-bg);color:var(--green)}
+.overdue,.high{background:var(--high-bg);color:var(--red)}
+.unpaid,.medium{background:var(--medium-bg);color:var(--amber)}
+.other,.new{background:var(--new-bg);color:var(--new-text)}
+.grid-btn{background:var(--card);color:var(--blue);font-size:12px;font-weight:700;padding:4px 12px;box-shadow:inset 0 0 0 1px var(--blue)}
+.grid-btn:hover{background:var(--blue-soft)}
 .dash{color:var(--muted)}
 .muted{color:var(--muted);font-size:14px}
+
 @media (max-width:1000px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media (max-width:800px){main{grid-template-columns:1fr;height:auto}#messages{height:60vh}}
+@media (max-width:800px){main{grid-template-columns:1fr;height:auto;padding:16px}#messages{height:60vh}header .tagline{display:none}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
-<header><h1>PayNudge</h1><span>AI invoicing assistant powered by PayPal</span></header>
+<header>
+  <div class="logo">PW</div>
+  <h1>Paidwise</h1>
+  <span class="tagline">AI invoicing agent &middot; Built on PayPal APIs</span>
+  <div class="header-right">
+    <div class="live"><span class="live-dot"></span>Live &middot; Sandbox</div>
+    <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Switch theme" title="Switch theme"></button>
+  </div>
+</header>
 <main>
   <section class="panel">
     <div id="messages"></div>
@@ -97,8 +190,8 @@ form{display:flex;gap:8px;padding:12px;border-top:1px solid var(--border)}
       <div class="tiles">
         <div class="tile"><div class="label">Outstanding</div><div class="value" id="t-outstanding">-</div><div class="hint">All unpaid invoices</div></div>
         <div class="tile warn"><div class="label">Overdue</div><div class="value" id="t-overdue">-</div><div class="hint">Past due date</div></div>
-        <div class="tile good"><div class="label">Expected in 7 days</div><div class="value" id="t-7">-</div><div class="hint">Predicted from history</div></div>
-        <div class="tile good"><div class="label">Expected in 30 days</div><div class="value" id="t-30">-</div><div class="hint">Predicted from history</div></div>
+        <div class="tile good"><div class="label">Next 7 days</div><div class="value" id="t-7">-</div><div class="hint">Predicted from history</div></div>
+        <div class="tile good"><div class="label">Next 30 days</div><div class="value" id="t-30">-</div><div class="hint">Predicted from history</div></div>
       </div>
 
       <div class="section-title">Client payment risk</div>
@@ -118,6 +211,8 @@ const form = document.getElementById("chat-form");
 const input = document.getElementById("input");
 const OPEN_STATUSES = ["SENT", "UNPAID", "PARTIALLY_PAID", "PAYMENT_PENDING"];
 const STEP_ICONS = {read: "\u2193", ai: "\u2726", wait: "\u23F8", paypal: "\u2713", error: "\u26A0", info: "\u2139", user: "\u261B"};
+const REDUCE_MOTION = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const THEME_KEY = "paidwise-theme";
 
 /* ---------- small helpers ---------- */
 function escapeHtml(t) {
@@ -140,6 +235,68 @@ function pill(text, cls) {
 }
 function scrollDown() { messages.scrollTop = messages.scrollHeight; }
 
+/* ---------- theme (light / dark) ---------- */
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+}
+function savedTheme() {
+  try {
+    const t = localStorage.getItem(THEME_KEY);
+    return (t === "dark" || t === "light") ? t : null;
+  } catch (e) {
+    return null;
+  }
+}
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  const btn = document.getElementById("theme-toggle");
+  btn.textContent = theme === "dark" ? "\u2600" : "\u263E";
+  btn.setAttribute("aria-label", theme === "dark" ? "Switch to light theme" : "Switch to dark theme");
+  btn.title = btn.getAttribute("aria-label");
+  const gridLook = gridTheme(theme);
+  if (gridLook) {
+    if (riskGrid) riskGrid.setGridOption("theme", gridLook);
+    if (invoiceGrid) invoiceGrid.setGridOption("theme", gridLook);
+  }
+}
+document.getElementById("theme-toggle").onclick = () => {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* storage unavailable: still switch */ }
+  applyTheme(next);
+};
+if (window.matchMedia) {
+  const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+  const onSystemChange = e => { if (!savedTheme()) applyTheme(e.matches ? "dark" : "light"); };
+  if (systemDark.addEventListener) systemDark.addEventListener("change", onSystemChange);
+}
+
+/* ---------- visual effects ---------- */
+function addTilt(el) {
+  if (REDUCE_MOTION || !window.matchMedia("(hover: hover)").matches) return;
+  el.addEventListener("mousemove", e => {
+    const r = el.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width - 0.5;
+    const y = (e.clientY - r.top) / r.height - 0.5;
+    el.style.transform = "rotateX(" + (-y * 5).toFixed(2) + "deg) rotateY(" + (x * 5).toFixed(2) + "deg) translateY(-2px)";
+  });
+  el.addEventListener("mouseleave", () => { el.style.transform = ""; });
+}
+
+function animateMoney(el, target) {
+  const start = parseFloat(el.dataset.value || "0");
+  el.dataset.value = String(target);
+  if (REDUCE_MOTION || start === target) { el.textContent = formatMoney(target); return; }
+  const duration = 700;
+  const begin = performance.now();
+  function step(now) {
+    const t = Math.min(1, (now - begin) / duration);
+    const eased = 1 - Math.pow(1 - t, 3);
+    el.textContent = formatMoney(start + (target - start) * eased);
+    if (t < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
 /* ---------- chat ---------- */
 function addMessage(role, text) {
   const d = document.createElement("div");
@@ -151,7 +308,7 @@ function addMessage(role, text) {
 function showThinking() {
   const d = document.createElement("div");
   d.className = "thinking";
-  d.textContent = "Thinking...";
+  d.innerHTML = 'Thinking <span class="dots"><i></i><i></i><i></i></span>';
   messages.appendChild(d);
   scrollDown();
   return d;
@@ -352,25 +509,25 @@ const riskColumns = [
       : pill(p.data.risk_level + " (" + p.data.risk_score + ")", p.data.risk_level.toLowerCase()),
     sort: "desc"
   },
-  {field: "history", headerName: "Late payments", minWidth: 110, flex: 1, tooltipField: "reason"},
-  {field: "avg_days_late", headerName: "Avg days late", minWidth: 110, flex: 1},
-  {field: "outstanding", headerName: "Outstanding", minWidth: 110, flex: 1, valueFormatter: p => formatMoney(p.value)},
-  {field: "next_expected", headerName: "Next expected", minWidth: 120, flex: 1}
+  {field: "history", headerName: "Late payments", minWidth: 130, flex: 1, tooltipField: "reason"},
+  {field: "avg_days_late", headerName: "Avg days late", minWidth: 120, flex: 1},
+  {field: "outstanding", headerName: "Outstanding", minWidth: 120, flex: 1, valueFormatter: p => formatMoney(p.value)},
+  {field: "next_expected", headerName: "Next expected", minWidth: 135, flex: 1}
 ];
 
 /* ---------- AG Grid: invoices ---------- */
 const invoiceColumns = [
-  {field: "client", headerName: "Client", minWidth: 90, flex: 1, filter: true},
-  {field: "amount", headerName: "Amount", minWidth: 100, flex: 1, filter: "agNumberColumnFilter", valueFormatter: p => formatMoney(p.value)},
-  {field: "due_date", headerName: "Due", minWidth: 105, flex: 1, sort: "desc"},
+  {field: "client", headerName: "Client", minWidth: 95, flex: 1, filter: true},
+  {field: "amount", headerName: "Amount", minWidth: 115, flex: 1, filter: "agNumberColumnFilter", valueFormatter: p => formatMoney(p.value)},
+  {field: "due_date", headerName: "Due", minWidth: 110, flex: 1, sort: "desc"},
   {
-    field: "status_label", headerName: "Status", minWidth: 100, flex: 1, filter: true,
+    field: "status_label", headerName: "Status", minWidth: 110, flex: 1, filter: true,
     cellRenderer: p => pill(p.value, p.data.status_class)
   },
-  {field: "expected", headerName: "Expected", minWidth: 105, flex: 1},
+  {field: "expected", headerName: "Expected", minWidth: 110, flex: 1},
   {field: "invoice_id", headerName: "PayPal invoice", minWidth: 150, flex: 1.2, tooltipField: "invoice_id"},
   {
-    headerName: "Action", minWidth: 130, maxWidth: 140, pinned: "right", sortable: false,
+    headerName: "Action", minWidth: 140, maxWidth: 150, pinned: "right", sortable: false,
     cellRenderer: p => {
       if (!OPEN_STATUSES.includes(p.data.status)) {
         const s = document.createElement("span");
@@ -387,18 +544,57 @@ const invoiceColumns = [
   }
 ];
 
+function gridTheme(theme) {
+  if (!window.agGrid || !agGrid.themeQuartz) return undefined;
+  const shared = {
+    headerFontWeight: 600,
+    headerFontSize: 13,
+    wrapperBorderRadius: 14,
+    borderRadius: 8,
+    fontFamily: "system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif",
+    fontSize: 14
+  };
+  if (theme === "dark") {
+    return agGrid.themeQuartz.withParams(Object.assign({}, shared, {
+      accentColor: "#3d9bff",
+      backgroundColor: "#101a2d",
+      foregroundColor: "#d3dcec",
+      headerBackgroundColor: "#16223a",
+      headerTextColor: "#e8eefb",
+      borderColor: "#1f2b42",
+      rowHoverColor: "#16243d",
+      oddRowBackgroundColor: "#101a2d",
+      browserColorScheme: "dark"
+    }));
+  }
+  return agGrid.themeQuartz.withParams(Object.assign({}, shared, {
+    accentColor: "#0070e0",
+    backgroundColor: "#ffffff",
+    foregroundColor: "#0b1f45",
+    headerBackgroundColor: "#f5f7fa",
+    headerTextColor: "#001c64",
+    borderColor: "#e3e8ef",
+    rowHoverColor: "#f2f7fd",
+    browserColorScheme: "light"
+  }));
+}
+
 function makeGrid(elementId, columns) {
   if (!window.agGrid) {
     document.getElementById(elementId).innerHTML = '<p class="muted">Could not load the table library.</p>';
     return null;
   }
-  return agGrid.createGrid(document.getElementById(elementId), {
+  const options = {
     columnDefs: columns,
     defaultColDef: {sortable: true, resizable: true, cellDataType: false},
     domLayout: "autoHeight",
     rowData: [],
-    tooltipShowDelay: 300
-  });
+    tooltipShowDelay: 300,
+    animateRows: true
+  };
+  const theme = gridTheme(currentTheme());
+  if (theme) options.theme = theme;
+  return agGrid.createGrid(document.getElementById(elementId), options);
 }
 
 function invoiceStatus(inv) {
@@ -471,18 +667,20 @@ function renderCashflow(invoices, riskData) {
     if (d <= 7) in7 += amountNumber(o.amount);
     if (d <= 30) in30 += amountNumber(o.amount);
   }));
-  document.getElementById("t-outstanding").textContent = formatMoney(outstanding);
-  document.getElementById("t-overdue").textContent = formatMoney(overdue);
-  document.getElementById("t-7").textContent = formatMoney(in7);
-  document.getElementById("t-30").textContent = formatMoney(in30);
+  animateMoney(document.getElementById("t-outstanding"), outstanding);
+  animateMoney(document.getElementById("t-overdue"), overdue);
+  animateMoney(document.getElementById("t-7"), in7);
+  animateMoney(document.getElementById("t-30"), in30);
 }
 
 document.getElementById("refresh").onclick = refreshSide;
 
 /* ---------- start ---------- */
 async function startup() {
+  document.querySelectorAll(".tile").forEach(addTilt);
   riskGrid = makeGrid("risk-grid", riskColumns);
   invoiceGrid = makeGrid("invoice-grid", invoiceColumns);
+  applyTheme(currentTheme());
   refreshSide();
   await pollEvents(true);
   setInterval(() => pollEvents(false), 5000);
@@ -493,7 +691,7 @@ async function startup() {
     handleResponse(data);
   } catch (e) {
     t.remove();
-    addMessage("assistant", "Hi! I'm PayNudge. Tell me who to bill and I'll handle the PayPal invoice.");
+    addMessage("assistant", "Hi! I'm Paidwise. Tell me who to bill and I'll handle the PayPal invoice.");
   }
 }
 startup();

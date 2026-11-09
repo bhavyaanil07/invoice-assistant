@@ -59,7 +59,7 @@ def risk_for(client_name):
 def system_prompt():
     today = date.today()
     return f"""
-You are PayNudge, an invoicing assistant for freelancers and small sellers, connected to PayPal.
+You are Paidwise, an invoicing assistant for freelancers and small sellers, connected to PayPal.
 Today is {today.strftime('%A')}, {today.isoformat()}. Use this to work out dates like "Friday" or "next week".
 All amounts are in US dollars.
 
