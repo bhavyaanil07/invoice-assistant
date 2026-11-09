@@ -29,7 +29,7 @@ main{display:grid;grid-template-columns:minmax(360px,5fr) minmax(0,6fr);gap:16px
 .trace-line.wait{color:var(--amber)}
 .trace-line.ai{color:#6d28d9}
 .trace-line.user{color:var(--blue)}
-.card{align-self:flex-start;border:1px solid var(--border);border-left:4px solid var(--blue);border-radius:10px;padding:12px 14px;width:min(380px,90%);background:#fff}
+.card{align-self:flex-start;border:1px solid var(--border);border-left:4px solid var(--blue);border-radius:10px;padding:12px 14px;width:min(420px,92%);background:#fff}
 .card h3{margin:0 0 8px;font-size:15px}
 .card .row{display:flex;justify-content:space-between;font-size:14px;padding:3px 0;gap:12px}
 .card .row span:first-child{color:var(--muted)}
@@ -37,6 +37,11 @@ main{display:grid;grid-template-columns:minmax(360px,5fr) minmax(0,6fr);gap:16px
 .card .note{font-size:14px;background:#f9fafb;padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap}
 .card .buttons{display:flex;gap:8px;margin-top:10px}
 .card .result{margin-top:8px;font-size:14px;font-weight:600}
+.protect{margin-top:10px;border:1px solid #fde68a;background:#fffbeb;border-radius:8px;padding:8px 10px}
+.protect-title{font-size:13px;font-weight:700;color:var(--amber);margin-bottom:6px}
+.option{display:flex;gap:8px;align-items:flex-start;font-size:13px;padding:5px 0;cursor:pointer;line-height:1.35}
+.option input{margin-top:3px}
+.option .hint{color:var(--muted)}
 button{font:inherit;border:none;border-radius:8px;padding:8px 14px;cursor:pointer}
 .primary{background:var(--blue);color:#fff}
 .secondary{background:#e5e7eb}
@@ -192,6 +197,8 @@ function addActionCard(action) {
   card.className = "card";
   const h = document.createElement("h3");
   card.appendChild(h);
+  let getOption = () => "standard";
+
   if (action.type === "invoice") {
     h.textContent = "Review invoice";
     card.append(
@@ -201,6 +208,38 @@ function addActionCard(action) {
       row("Amount", formatMoney(action.amount)),
       row("Due", action.due_date)
     );
+    if (action.options && action.options.length) {
+      const box = document.createElement("div");
+      box.className = "protect";
+      const t = document.createElement("div");
+      t.className = "protect-title";
+      t.textContent = "\u26A0 " + action.client_name + " is " + action.risk_level + " risk. Protect this invoice:";
+      box.appendChild(t);
+      const groupName = "opt-" + action.id;
+      action.options.forEach(opt => {
+        const label = document.createElement("label");
+        label.className = "option";
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = groupName;
+        radio.value = opt.key;
+        if (opt.key === action.recommended) radio.checked = true;
+        const text = document.createElement("span");
+        const strong = document.createElement("b");
+        strong.textContent = opt.title + (opt.key === action.recommended ? " (recommended)" : "");
+        const hint = document.createElement("div");
+        hint.className = "hint";
+        hint.textContent = opt.detail;
+        text.append(strong, hint);
+        label.append(radio, text);
+        box.appendChild(label);
+      });
+      card.appendChild(box);
+      getOption = () => {
+        const checked = card.querySelector('input[name="' + groupName + '"]:checked');
+        return checked ? checked.value : "standard";
+      };
+    }
   } else {
     h.textContent = "Review reminder";
     card.append(row("Client", action.client_name), row("Invoice", action.invoice_id));
@@ -209,6 +248,7 @@ function addActionCard(action) {
     n.textContent = action.message;
     card.appendChild(n);
   }
+
   const buttons = document.createElement("div");
   buttons.className = "buttons";
   const yes = document.createElement("button");
@@ -222,19 +262,20 @@ function addActionCard(action) {
   const result = document.createElement("div");
   result.className = "result";
   card.appendChild(result);
-  yes.onclick = () => decide(action, true, yes, no, result);
-  no.onclick = () => decide(action, false, yes, no, result);
+  yes.onclick = () => decide(card, action, true, getOption(), yes, no, result);
+  no.onclick = () => decide(card, action, false, "standard", yes, no, result);
   messages.appendChild(card);
   scrollDown();
 }
 
-async function decide(action, approved, yes, no, result) {
+async function decide(card, action, approved, option, yes, no, result) {
   yes.disabled = true;
   no.disabled = true;
+  card.querySelectorAll("input[type=radio]").forEach(r => r.disabled = true);
   result.textContent = approved ? "Sending..." : "Cancelled";
   const t = showThinking();
   try {
-    const data = await post("/api/confirm", {session_id: sessionId, action_id: action.id, approved: approved});
+    const data = await post("/api/confirm", {session_id: sessionId, action_id: action.id, approved: approved, option: option});
     t.remove();
     if (approved) {
       result.textContent = (data.result && !data.result.error) ? "\u2713 Sent through PayPal" : "\u2717 Something went wrong";
@@ -362,6 +403,7 @@ function makeGrid(elementId, columns) {
 
 function invoiceStatus(inv) {
   if (inv.status === "PAID" || inv.status === "MARKED_AS_PAID") return ["Paid", "paid"];
+  if (inv.status === "PARTIALLY_PAID") return ["Part paid", "unpaid"];
   if (inv.overdue) return ["Overdue", "overdue"];
   if (OPEN_STATUSES.includes(inv.status)) return ["Unpaid", "unpaid"];
   return [inv.status, "other"];

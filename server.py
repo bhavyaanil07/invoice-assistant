@@ -26,6 +26,9 @@ WEBHOOK_ID = os.getenv("PAYPAL_WEBHOOK_ID", "")
 
 MAX_INVOICE_AMOUNT = 10000
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+DEPOSIT_PERCENT = 50
+EARLY_DISCOUNT_PERCENT = 2
+EARLY_DISCOUNT_DAYS = 2
 
 app = FastAPI()
 sessions = {}        # one chat per browser tab
@@ -40,6 +43,19 @@ def remember_risk(result):
             last_known_risk[c["client"]] = c
 
 
+def risk_for(client_name):
+    """Find a client's latest risk result, ignoring upper/lower case."""
+    key = str(client_name).strip().lower()
+    for name, c in last_known_risk.items():
+        if name.lower() == key:
+            return c
+    remember_risk(risk.client_risk())
+    for name, c in last_known_risk.items():
+        if name.lower() == key:
+            return c
+    return None
+
+
 def system_prompt():
     today = date.today()
     return f"""
@@ -51,9 +67,11 @@ How you work:
 - To bill someone you need: client name, client email, item, amount and due date.
   If anything is missing, ask for it. If no due date is given, use 7 days from today.
 - Before proposing an invoice for an existing client, call get_client_risk. If the client is High risk,
-  briefly mention their payment history and suggest a shorter due date, then propose the invoice anyway.
+  briefly mention their payment history, then propose the invoice.
 - When you have the details, call propose_invoice. This does NOT send anything: the user sees a card
   with Send and Cancel buttons. Tell them to review the card. Do not ask "shall I send it?" in text.
+- If propose_invoice returns protection_options, tell the user in one sentence that the card lets them
+  protect the invoice, which option is recommended, and why (based on the client's risk).
 - For reminders: call list_invoices to find the invoice and get_client_risk to check the client.
   For High risk clients write a clear, firm but polite reminder that mentions the due date and how late it is.
   For Low or Medium risk clients write a gentle, friendly reminder. Then call propose_reminder.
@@ -121,6 +139,22 @@ def validate_reminder(invoice_id, message):
     return problems
 
 
+# ---------- invoice protection for risky clients ----------
+
+def protection_options(amount, due_date):
+    deposit = round(amount * DEPOSIT_PERCENT / 100, 2)
+    discounted = round(amount * (100 - EARLY_DISCOUNT_PERCENT) / 100, 2)
+    early_due = (date.today() + timedelta(days=EARLY_DISCOUNT_DAYS)).isoformat()
+    return [
+        {"key": "standard", "title": "Standard invoice",
+         "detail": f"Full ${amount:.2f} due {due_date}"},
+        {"key": "deposit", "title": f"Require {DEPOSIT_PERCENT}% upfront",
+         "detail": f"PayPal requires a first payment of at least ${deposit:.2f}; the rest by {due_date}"},
+        {"key": "early_discount", "title": f"{EARLY_DISCOUNT_PERCENT}% early-payment discount",
+         "detail": f"Client pays ${discounted:.2f}, due {early_due}"},
+    ]
+
+
 # ---------- activity log: what the agent did, shown in the chat ----------
 
 def log(state, kind, text):
@@ -171,11 +205,25 @@ def new_session():
             "amount": round(float(amount), 2),
             "due_date": str(due_date)[:10],
         }
+        result = {"status": "waiting_for_user_to_click_send", "action_id": action["id"]}
+
+        client_risk = risk_for(action["client_name"])
+        if client_risk and client_risk["risk_level"] in ("High", "Medium"):
+            action["risk_level"] = client_risk["risk_level"]
+            action["options"] = protection_options(action["amount"], action["due_date"])
+            action["recommended"] = "deposit" if client_risk["risk_level"] == "High" else "early_discount"
+            recommended_title = next(o["title"] for o in action["options"] if o["key"] == action["recommended"])
+            log(state, "ai", f"Risk engine: {action['client_name']} is {client_risk['risk_level']} "
+                             f"({client_risk['risk_score']}). Offering protection, recommended: {recommended_title}")
+            result["protection_options"] = [o["title"] for o in action["options"]]
+            result["recommended"] = recommended_title
+            result["client_risk_reason"] = client_risk["reason"]
+
         state["pending"][action["id"]] = action
         state["new_actions"].append(action)
         log(state, "wait", f"Invoice checked and ready for {action['client_name']}: "
                            f"${action['amount']:.2f}, due {action['due_date']}. Waiting for your approval")
-        return {"status": "waiting_for_user_to_click_send", "action_id": action["id"]}
+        return result
 
     def propose_reminder(invoice_id: str, client_name: str, message: str) -> dict:
         """Prepare a payment reminder for the user to review. This does NOT send anything.
@@ -401,6 +449,7 @@ class ConfirmIn(BaseModel):
     session_id: str
     action_id: str
     approved: bool
+    option: str = "standard"
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -434,19 +483,33 @@ def confirm(body: ConfirmIn):
         out["result"] = None
         return out
 
-    pre.append({"kind": "user", "text": f"You approved the {action['type']} for {action['client_name']}"})
     start = time.time()
     if action["type"] == "invoice":
+        allowed = [o["key"] for o in action.get("options", [])]
+        option = body.option if body.option in allowed else "standard"
+        due_date = action["due_date"]
+        deposit = discount = None
+        if option == "deposit":
+            deposit = DEPOSIT_PERCENT
+        elif option == "early_discount":
+            discount = EARLY_DISCOUNT_PERCENT
+            due_date = (date.today() + timedelta(days=EARLY_DISCOUNT_DAYS)).isoformat()
+        chosen = next((o["title"] for o in action.get("options", []) if o["key"] == option), "Standard invoice")
+        pre.append({"kind": "user", "text": f"You approved the invoice for {action['client_name']} ({chosen})"})
+
         result = pp.create_and_send_invoice(
             action["client_name"], action["client_email"], action["item"],
-            action["amount"], action["due_date"],
+            action["amount"], due_date,
+            deposit_percent=deposit, discount_percent=discount,
         )
         if "error" in result:
             pre.append({"kind": "error", "text": "PayPal: invoice failed. " + result["error"][:160]})
         else:
-            pre.append({"kind": "paypal", "text": f"PayPal: invoice {result['invoice_id']} created and sent "
+            extra = "" if result.get("protection") == "standard" else f" with {result['protection']}"
+            pre.append({"kind": "paypal", "text": f"PayPal: invoice {result['invoice_id']} created{extra} and sent "
                                                   f"in {time.time() - start:.1f}s"})
     else:
+        pre.append({"kind": "user", "text": f"You approved the reminder for {action['client_name']}"})
         result = pp.send_reminder(action["invoice_id"], action["message"])
         if "error" in result:
             pre.append({"kind": "error", "text": "PayPal: reminder failed. " + result["error"][:160]})
@@ -455,7 +518,8 @@ def confirm(body: ConfirmIn):
                                                   f"in {time.time() - start:.1f}s"})
 
     note = (f"[The user clicked Send on the {action['type']}. PayPal result: {result}] "
-            "Tell the user briefly what happened. If there is a payment link, include it.")
+            "Tell the user briefly what happened, including any protection applied. "
+            "If there is a payment link, include it.")
     out = ask_agent(state, note, pre)
     out["result"] = result
     return out

@@ -1,4 +1,5 @@
 import os
+import time
 from datetime import date
 
 import requests
@@ -11,16 +12,23 @@ BASE_URL = os.getenv("PAYPAL_BASE_URL")
 
 UNPAID_STATUSES = {"SENT", "UNPAID", "PARTIALLY_PAID", "PAYMENT_PENDING"}
 
+_token_cache = {"token": None, "expires_at": 0}
+
 
 def get_token():
-    """Log in to PayPal and return an access token."""
+    """Log in to PayPal and return an access token, reusing it until it expires."""
+    if _token_cache["token"] and time.time() < _token_cache["expires_at"]:
+        return _token_cache["token"]
     response = requests.post(
         f"{BASE_URL}/v1/oauth2/token",
         auth=(CLIENT_ID, SECRET),
         data={"grant_type": "client_credentials"},
     )
     response.raise_for_status()
-    return response.json()["access_token"]
+    data = response.json()
+    _token_cache["token"] = data["access_token"]
+    _token_cache["expires_at"] = time.time() + data.get("expires_in", 3600) - 60
+    return _token_cache["token"]
 
 
 def headers(token):
@@ -31,14 +39,20 @@ def headers(token):
 
 
 def create_and_send_invoice(client_name, client_email, item, amount, due_date,
-                            note="Thank you for your business!"):
-    """Create a PayPal invoice, send it, and return a short summary."""
+                            note="Thank you for your business!",
+                            deposit_percent=None, discount_percent=None):
+    """Create a PayPal invoice, send it, and return a short summary.
+
+    deposit_percent: if set (e.g. 50), PayPal requires at least this share as the first payment.
+    discount_percent: if set (e.g. 2), PayPal applies this discount to the whole invoice.
+    """
     try:
         token = get_token()
+        amount = float(amount)
+        notes = [note]
         invoice = {
             "detail": {
                 "currency_code": "USD",
-                "note": note,
                 "payment_term": {"due_date": due_date},
             },
             "primary_recipients": [
@@ -53,10 +67,33 @@ def create_and_send_invoice(client_name, client_email, item, amount, due_date,
                 {
                     "name": item,
                     "quantity": "1",
-                    "unit_amount": {"currency_code": "USD", "value": f"{float(amount):.2f}"},
+                    "unit_amount": {"currency_code": "USD", "value": f"{amount:.2f}"},
                 }
             ],
         }
+
+        protection = "standard"
+        if deposit_percent:
+            minimum = round(amount * deposit_percent / 100, 2)
+            invoice["configuration"] = {
+                "partial_payment": {
+                    "allow_partial_payment": True,
+                    "minimum_amount_due": {"currency_code": "USD", "value": f"{minimum:.2f}"},
+                }
+            }
+            notes.append(f"A first payment of at least ${minimum:.2f} ({deposit_percent}%) is required.")
+            protection = f"{deposit_percent}% minimum upfront payment (${minimum:.2f})"
+        elif discount_percent:
+            invoice["amount"] = {
+                "breakdown": {
+                    "discount": {"invoice_discount": {"percent": str(discount_percent)}}
+                }
+            }
+            notes.append(f"Includes a {discount_percent}% early-payment discount.")
+            protection = f"{discount_percent}% early-payment discount"
+
+        invoice["detail"]["note"] = " ".join(notes)
+
         create = requests.post(
             f"{BASE_URL}/v2/invoicing/invoices",
             headers={**headers(token), "Prefer": "return=representation"},
@@ -64,7 +101,9 @@ def create_and_send_invoice(client_name, client_email, item, amount, due_date,
         )
         if not create.ok:
             return {"error": f"Could not create invoice: {create.text}"}
-        invoice_id = create.json()["id"]
+        created = create.json()
+        invoice_id = created["id"]
+        total = created.get("amount", {}).get("value", f"{amount:.2f}")
 
         send = requests.post(
             f"{BASE_URL}/v2/invoicing/invoices/{invoice_id}/send",
@@ -78,8 +117,9 @@ def create_and_send_invoice(client_name, client_email, item, amount, due_date,
             "invoice_id": invoice_id,
             "status": "SENT",
             "client": client_name,
-            "amount": f"{float(amount):.2f} USD",
+            "amount": f"{float(total):.2f} USD",
             "due_date": due_date,
+            "protection": protection,
             "payment_link": send.json().get("href"),
         }
     except Exception as e:
