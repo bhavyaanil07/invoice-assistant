@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PayNudge</title>
+<script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js"></script>
 <style>
 :root{--blue:#0070e0;--navy:#003087;--bg:#f5f7fa;--card:#fff;--text:#1a1a1a;--muted:#6b7280;--border:#e5e7eb;--green:#15803d;--red:#b91c1c;--amber:#b45309}
 *{box-sizing:border-box}
@@ -11,10 +12,10 @@ body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;backgrou
 header{background:var(--navy);color:#fff;padding:14px 20px;display:flex;align-items:baseline;gap:12px}
 header h1{font-size:20px;margin:0}
 header span{opacity:.8;font-size:14px}
-main{display:grid;grid-template-columns:1fr 380px;gap:16px;padding:16px;height:calc(100vh - 56px)}
-.panel{background:var(--card);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;min-height:0}
+main{display:grid;grid-template-columns:minmax(360px,5fr) minmax(0,6fr);gap:16px;padding:16px;height:calc(100vh - 56px)}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;min-height:0;min-width:0}
 #messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
-.msg{max-width:80%;padding:10px 14px;border-radius:12px;line-height:1.45;white-space:pre-wrap;word-wrap:break-word}
+.msg{max-width:85%;padding:10px 14px;border-radius:12px;line-height:1.45;white-space:pre-wrap;word-wrap:break-word}
 .user{align-self:flex-end;background:var(--blue);color:#fff}
 .assistant{align-self:flex-start;background:#eef2f7}
 .assistant a{color:var(--blue);word-break:break-all}
@@ -34,23 +35,30 @@ button:disabled{opacity:.5;cursor:default}
 .suggestions{display:flex;gap:6px;flex-wrap:wrap;padding:0 12px 4px}
 .suggestions button{background:#eef2f7;font-size:13px;padding:6px 10px}
 form{display:flex;gap:8px;padding:12px;border-top:1px solid var(--border)}
-#input{flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font:inherit}
+#input{flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font:inherit;min-width:0}
 .panel-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border)}
 .panel-head h2{margin:0;font-size:16px}
-.side-scroll{overflow-y:auto;padding:4px 12px 12px}
-.section-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:14px 4px 4px}
-.section-note{font-size:12px;color:var(--muted);margin:0 4px 6px}
-.item{padding:10px 4px;border-bottom:1px solid var(--border);font-size:14px}
-.item .top{display:flex;justify-content:space-between;align-items:center;font-weight:600;gap:8px}
-.item .sub{display:flex;justify-content:space-between;color:var(--muted);margin-top:4px;gap:8px}
-.item .reason{color:var(--muted);margin-top:4px;line-height:1.4}
-.item .expect{margin-top:4px;font-size:13px}
+.side-scroll{overflow-y:auto;padding:12px 16px 16px}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.tile{border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:#fafbfc}
+.tile .label{font-size:12px;color:var(--muted)}
+.tile .value{font-size:20px;font-weight:700;margin-top:4px}
+.tile .hint{font-size:11px;color:var(--muted);margin-top:2px}
+.tile.warn .value{color:var(--red)}
+.tile.good .value{color:var(--green)}
+.section-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:18px 0 2px}
+.section-note{font-size:12px;color:var(--muted);margin:0 0 8px}
+.grid-box{width:100%}
 .badge{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
 .paid,.low{background:#dcfce7;color:var(--green)}
 .overdue,.high{background:#fee2e2;color:var(--red)}
 .unpaid,.medium{background:#fef3c7;color:var(--amber)}
 .other,.new{background:#e5e7eb;color:#374151}
-.muted{color:var(--muted);font-size:14px;margin:8px 4px}
+.grid-btn{background:#eef2f7;color:var(--blue);font-size:12px;padding:4px 10px;border-radius:6px;font-weight:600}
+.grid-btn:hover{background:#dbe7f5}
+.dash{color:var(--muted)}
+.muted{color:var(--muted);font-size:14px}
+@media (max-width:1000px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:800px){main{grid-template-columns:1fr;height:auto}#messages{height:60vh}}
 </style>
 </head>
@@ -72,11 +80,20 @@ form{display:flex;gap:8px;padding:12px;border-top:1px solid var(--border)}
   <aside class="panel">
     <div class="panel-head"><h2>Overview</h2><button class="secondary" id="refresh" type="button">Refresh</button></div>
     <div class="side-scroll">
+      <div class="tiles">
+        <div class="tile"><div class="label">Outstanding</div><div class="value" id="t-outstanding">-</div><div class="hint">All unpaid invoices</div></div>
+        <div class="tile warn"><div class="label">Overdue</div><div class="value" id="t-overdue">-</div><div class="hint">Past due date</div></div>
+        <div class="tile good"><div class="label">Expected in 7 days</div><div class="value" id="t-7">-</div><div class="hint">Predicted from history</div></div>
+        <div class="tile good"><div class="label">Expected in 30 days</div><div class="value" id="t-30">-</div><div class="hint">Predicted from history</div></div>
+      </div>
+
       <div class="section-title">Client payment risk</div>
       <p class="section-note">Scored from each client's PayPal payment history</p>
-      <div id="risk"><p class="muted">Loading...</p></div>
+      <div id="risk-grid" class="grid-box"></div>
+
       <div class="section-title">Invoices</div>
-      <div id="invoices"><p class="muted">Loading...</p></div>
+      <p class="section-note">Live from PayPal. Click "Draft reminder" to ask the agent for one.</p>
+      <div id="invoice-grid" class="grid-box"></div>
     </div>
   </aside>
 </main>
@@ -85,18 +102,30 @@ const sessionId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : S
 const messages = document.getElementById("messages");
 const form = document.getElementById("chat-form");
 const input = document.getElementById("input");
+const OPEN_STATUSES = ["SENT", "UNPAID", "PARTIALLY_PAID", "PAYMENT_PENDING"];
 
+/* ---------- small helpers ---------- */
 function escapeHtml(t) {
   return String(t).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 function linkify(t) {
   return escapeHtml(t).replace(/(https?:\/\/[^\s)]+[^\s).,])/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
 }
-function money(amountText) {
-  return "$" + String(amountText).split(" ")[0];
+function amountNumber(amountText) {
+  return parseFloat(String(amountText).split(" ")[0]) || 0;
+}
+function formatMoney(n) {
+  return "$" + Number(n || 0).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+function pill(text, cls) {
+  const s = document.createElement("span");
+  s.className = "badge " + cls;
+  s.textContent = text;
+  return s;
 }
 function scrollDown() { messages.scrollTop = messages.scrollHeight; }
 
+/* ---------- chat ---------- */
 function addMessage(role, text) {
   const d = document.createElement("div");
   d.className = "msg " + role;
@@ -141,7 +170,7 @@ function addActionCard(action) {
       row("Client", action.client_name),
       row("Email", action.client_email),
       row("For", action.item),
-      row("Amount", "$" + Number(action.amount).toFixed(2)),
+      row("Amount", formatMoney(action.amount)),
       row("Due", action.due_date)
     );
   } else {
@@ -202,7 +231,7 @@ async function sendMessage(text) {
     const data = await post("/api/chat", {session_id: sessionId, message: text});
     t.remove();
     handleResponse(data);
-    loadInvoices();
+    refreshSide();
   } catch (e) {
     t.remove();
     addMessage("assistant", "Sorry, I couldn't reach the server. " + e.message);
@@ -218,70 +247,150 @@ form.addEventListener("submit", e => {
 });
 document.querySelectorAll(".suggestions button").forEach(b => b.onclick = () => sendMessage(b.dataset.text));
 
-function invoiceBadge(inv) {
-  if (inv.status === "PAID" || inv.status === "MARKED_AS_PAID") return ["paid", "Paid"];
-  if (inv.overdue) return ["overdue", "Overdue"];
-  if (["SENT", "UNPAID", "PARTIALLY_PAID", "PAYMENT_PENDING"].includes(inv.status)) return ["unpaid", "Unpaid"];
-  return ["other", inv.status];
+/* ---------- AG Grid: client risk ---------- */
+let riskGrid = null;
+let invoiceGrid = null;
+
+const riskColumns = [
+  {field: "client", headerName: "Client", minWidth: 90, flex: 1, filter: true},
+  {
+    headerName: "Risk", minWidth: 130, flex: 1,
+    valueGetter: p => p.data.risk_score === null ? -1 : p.data.risk_score,
+    cellRenderer: p => p.data.risk_level === "New"
+      ? pill("New client", "new")
+      : pill(p.data.risk_level + " (" + p.data.risk_score + ")", p.data.risk_level.toLowerCase()),
+    sort: "desc"
+  },
+  {field: "history", headerName: "Late payments", minWidth: 110, flex: 1, tooltipField: "reason"},
+  {field: "avg_days_late", headerName: "Avg days late", minWidth: 110, flex: 1},
+  {field: "outstanding", headerName: "Outstanding", minWidth: 110, flex: 1, valueFormatter: p => formatMoney(p.value)},
+  {field: "next_expected", headerName: "Next expected", minWidth: 120, flex: 1}
+];
+
+/* ---------- AG Grid: invoices ---------- */
+const invoiceColumns = [
+  {field: "client", headerName: "Client", minWidth: 90, flex: 1, filter: true},
+  {field: "amount", headerName: "Amount", minWidth: 100, flex: 1, filter: "agNumberColumnFilter", valueFormatter: p => formatMoney(p.value)},
+  {field: "due_date", headerName: "Due", minWidth: 105, flex: 1, sort: "desc"},
+  {
+    field: "status_label", headerName: "Status", minWidth: 100, flex: 1, filter: true,
+    cellRenderer: p => pill(p.value, p.data.status_class)
+  },
+  {field: "expected", headerName: "Expected", minWidth: 105, flex: 1},
+  {field: "invoice_id", headerName: "PayPal invoice", minWidth: 150, flex: 1.2, tooltipField: "invoice_id"},
+  {
+    headerName: "Action", minWidth: 130, maxWidth: 140, pinned: "right", sortable: false,
+    cellRenderer: p => {
+      if (!OPEN_STATUSES.includes(p.data.status)) {
+        const s = document.createElement("span");
+        s.className = "dash";
+        s.textContent = "-";
+        return s;
+      }
+      const b = document.createElement("button");
+      b.className = "grid-btn";
+      b.textContent = "Draft reminder";
+      b.onclick = () => sendMessage("Draft a reminder for " + p.data.client + "'s invoice " + p.data.invoice_id);
+      return b;
+    }
+  }
+];
+
+function makeGrid(elementId, columns) {
+  if (!window.agGrid) {
+    document.getElementById(elementId).innerHTML = '<p class="muted">Could not load the table library.</p>';
+    return null;
+  }
+  return agGrid.createGrid(document.getElementById(elementId), {
+    columnDefs: columns,
+    defaultColDef: {sortable: true, resizable: true, cellDataType: false},
+    domLayout: "autoHeight",
+    rowData: [],
+    tooltipShowDelay: 300
+  });
 }
 
-async function loadInvoices() {
-  const box = document.getElementById("invoices");
+function invoiceStatus(inv) {
+  if (inv.status === "PAID" || inv.status === "MARKED_AS_PAID") return ["Paid", "paid"];
+  if (inv.overdue) return ["Overdue", "overdue"];
+  if (OPEN_STATUSES.includes(inv.status)) return ["Unpaid", "unpaid"];
+  return [inv.status, "other"];
+}
+
+/* ---------- load everything on the right side ---------- */
+async function refreshSide() {
   try {
-    const r = await fetch("/api/invoices");
-    const data = await r.json();
-    if (data.error) { box.innerHTML = '<p class="muted">Could not load invoices.</p>'; return; }
-    if (!data.invoices.length) { box.innerHTML = '<p class="muted">No invoices yet.</p>'; return; }
-    box.innerHTML = "";
-    data.invoices.forEach(inv => {
-      const [cls, label] = invoiceBadge(inv);
-      const d = document.createElement("div");
-      d.className = "item";
-      d.innerHTML =
-        '<div class="top"><span>' + escapeHtml(inv.client) + '</span><span>' + escapeHtml(money(inv.amount)) + '</span></div>' +
-        '<div class="sub"><span>Due ' + escapeHtml(inv.due_date || "-") + '</span><span class="badge ' + cls + '">' + escapeHtml(label) + '</span></div>';
-      box.appendChild(d);
+    const [invRes, riskRes] = await Promise.all([fetch("/api/invoices"), fetch("/api/risk")]);
+    const invData = await invRes.json();
+    const riskData = await riskRes.json();
+    if (invData.error || riskData.error) throw new Error("data error");
+
+    const expectedById = {};
+    riskData.clients.forEach(c => (c.open_invoices || []).forEach(o => { expectedById[o.invoice_id] = o.expected_payment_date; }));
+
+    const riskRows = riskData.clients.map(c => {
+      const open = c.open_invoices || [];
+      const dates = open.map(o => o.expected_payment_date).sort();
+      return {
+        client: c.client,
+        risk_level: c.risk_level,
+        risk_score: c.risk_score,
+        reason: c.reason,
+        history: c.paid_invoices ? (c.paid_late + " of " + c.paid_invoices + " late") : "No history",
+        avg_days_late: c.paid_invoices ? c.avg_days_late : "-",
+        outstanding: open.reduce((sum, o) => sum + amountNumber(o.amount), 0),
+        next_expected: dates.length ? dates[0] : "-"
+      };
     });
+
+    const invoiceRows = invData.invoices.map(inv => {
+      const [label, cls] = invoiceStatus(inv);
+      return {
+        invoice_id: inv.invoice_id,
+        client: inv.client,
+        amount: amountNumber(inv.amount),
+        due_date: inv.due_date || "-",
+        status: inv.status,
+        status_label: label,
+        status_class: cls,
+        expected: expectedById[inv.invoice_id] || "-"
+      };
+    });
+
+    if (riskGrid) riskGrid.setGridOption("rowData", riskRows);
+    if (invoiceGrid) invoiceGrid.setGridOption("rowData", invoiceRows);
+    renderCashflow(invData.invoices, riskData);
   } catch (e) {
-    box.innerHTML = '<p class="muted">Could not load invoices.</p>';
+    console.error(e);
   }
 }
 
-async function loadRisk() {
-  const box = document.getElementById("risk");
-  try {
-    const r = await fetch("/api/risk");
-    const data = await r.json();
-    if (data.error) { box.innerHTML = '<p class="muted">Could not load risk scores.</p>'; return; }
-    if (!data.clients.length) { box.innerHTML = '<p class="muted">No clients yet.</p>'; return; }
-    box.innerHTML = "";
-    data.clients.forEach(c => {
-      const level = c.risk_level;
-      const label = level === "New" ? "New client" : level + " risk (" + c.risk_score + ")";
-      let html =
-        '<div class="top"><span>' + escapeHtml(c.client) + '</span><span class="badge ' + level.toLowerCase() + '">' + escapeHtml(label) + '</span></div>' +
-        '<div class="reason">' + escapeHtml(c.reason) + '</div>';
-      (c.open_invoices || []).forEach(o => {
-        html += '<div class="expect">Expected: ' + escapeHtml(money(o.amount)) + ' around ' + escapeHtml(o.expected_payment_date) +
-                ' <span style="color:var(--muted)">(due ' + escapeHtml(o.due_date) + ')</span></div>';
-      });
-      const d = document.createElement("div");
-      d.className = "item";
-      d.innerHTML = html;
-      box.appendChild(d);
-    });
-  } catch (e) {
-    box.innerHTML = '<p class="muted">Could not load risk scores.</p>';
-  }
+function renderCashflow(invoices, riskData) {
+  const today = new Date(riskData.today + "T00:00:00");
+  const daysFromToday = d => (new Date(d + "T00:00:00") - today) / 86400000;
+  let outstanding = 0, overdue = 0, in7 = 0, in30 = 0;
+  invoices.forEach(inv => {
+    if (!OPEN_STATUSES.includes(inv.status)) return;
+    outstanding += amountNumber(inv.amount);
+    if (inv.overdue) overdue += amountNumber(inv.amount);
+  });
+  riskData.clients.forEach(c => (c.open_invoices || []).forEach(o => {
+    const d = daysFromToday(o.expected_payment_date);
+    if (d <= 7) in7 += amountNumber(o.amount);
+    if (d <= 30) in30 += amountNumber(o.amount);
+  }));
+  document.getElementById("t-outstanding").textContent = formatMoney(outstanding);
+  document.getElementById("t-overdue").textContent = formatMoney(overdue);
+  document.getElementById("t-7").textContent = formatMoney(in7);
+  document.getElementById("t-30").textContent = formatMoney(in30);
 }
 
-function refreshSide() {
-  loadInvoices();
-  loadRisk();
-}
 document.getElementById("refresh").onclick = refreshSide;
 
+/* ---------- start ---------- */
 async function startup() {
+  riskGrid = makeGrid("risk-grid", riskColumns);
+  invoiceGrid = makeGrid("invoice-grid", invoiceColumns);
   refreshSide();
   const t = showThinking();
   try {

@@ -198,7 +198,7 @@ class ConfirmIn(BaseModel):
     approved: bool
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def home():
     return FileResponse("static/index.html")
 
